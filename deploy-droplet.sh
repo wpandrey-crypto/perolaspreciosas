@@ -24,19 +24,19 @@ npx tsx prisma/seed.ts
 echo "Gerando build de produção..."
 npm run build
 
-# 5. Iniciar com PM2 na porta 80 ou 3000
+# 5. Iniciar com PM2 na porta isolada 3005
 if command -v pm2 &> /dev/null; then
-  echo "Reiniciando aplicação no PM2..."
+  echo "Iniciando aplicação no PM2 na porta 3005..."
   pm2 delete perolas || true
-  PORT=80 pm2 start npm --name "perolas" -- start
+  PORT=3005 pm2 start npm --name "perolas" -- start
   pm2 save
-  echo "Aplicação rodando no PM2 na porta 80!"
+  echo "Aplicação rodando isolada no PM2 na porta 3005!"
 else
-  echo "Iniciando aplicação..."
-  PORT=80 npm start
+  echo "Iniciando aplicação na porta 3005..."
+  PORT=3005 npm start
 fi
 
 echo "=========================================="
-echo "  Deploy concluído com sucesso!"
-echo "  Acesse: http://143.198.165.231"
+echo "  Deploy concluído com segurança!"
+echo "  Acesse: http://143.198.165.231:3005"
 echo "=========================================="
