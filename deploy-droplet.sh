@@ -7,8 +7,13 @@ echo "=========================================="
 
 # 1. Configurar variáveis de ambiente se não existirem
 if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "[OK] Arquivo .env criado a partir de .env.example"
+  if [ -f .env.example ]; then
+    cp .env.example .env
+  else
+    echo 'DATABASE_URL="file:./dev.db"' > .env
+    echo 'PORT=3005' >> .env
+  fi
+  echo "[OK] Arquivo .env configurado com sucesso"
 fi
 
 # 2. Instalar dependências
