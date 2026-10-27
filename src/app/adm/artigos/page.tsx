@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import RichTextEditor from "@/components/RichTextEditor";
+import { Search, Plus, Edit2, Trash2, ArrowLeft, Layers, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface ArticleItem {
   id: number;
   title: string;
   slug: string;
   categoryId: number;
-  category?: { name: string; slug: string };
+  category?: { name: string; slug: string; parentSlug?: string | null };
   summary?: string;
   content: string;
   author?: string;
@@ -16,53 +18,67 @@ interface ArticleItem {
   createdAt: string;
 }
 
-const CATEGORIES = [
-  { id: 1, name: "Iniciantes" },
-  { id: 2, name: "Avançado" },
-  { id: 3, name: "Homilética" },
-  { id: 4, name: "Hermenêutica" },
-  { id: 5, name: "Religiões" },
-  { id: 6, name: "Seitas" },
-  { id: 7, name: "Doutrinas" },
-  { id: 8, name: "História da Igreja" },
-  { id: 9, name: "Vida Cristã" },
-  { id: 10, name: "Bíblia" },
-  { id: 11, name: "Eles / Elas" },
-  { id: 12, name: "EBD / EBF" },
-  { id: 13, name: "Missões" },
-  { id: 14, name: "Diversos" },
-];
+interface StructuredCategory {
+  id: number;
+  name: string;
+  slug: string;
+  subcategories: { id: number; name: string; slug: string }[];
+}
 
 export default function AdmArtigosPage() {
-  const router = useRouter();
   const [articles, setArticles] = useState<ArticleItem[]>([]);
+  const [structuredCats, setStructuredCats] = useState<StructuredCategory[]>([]);
+  const [flatCats, setFlatCats] = useState<{ id: number; name: string; parentSlug?: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Paginação e Busca
   const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 30;
+
+  // Estado de Criação / Edição
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
-  // Form
+  // Form State
   const [title, setTitle] = useState("");
-  const [categoryId, setCategoryId] = useState(1);
+  const [categoryId, setCategoryId] = useState<number>(1);
   const [summary, setSummary] = useState("");
   const [content, setContent] = useState("");
   const [isFeatured, setIsFeatured] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const loadArticles = async () => {
+  const loadData = async () => {
     try {
-      const res = await fetch("/api/adm/artigos");
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setArticles(data);
+      setLoading(true);
+      const [resArt, resCat] = await Promise.all([
+        fetch("/api/adm/artigos"),
+        fetch("/api/adm/categorias"),
+      ]);
+
+      const dataArt = await resArt.json();
+      const dataCat = await resCat.json();
+
+      if (Array.isArray(dataArt)) {
+        setArticles(dataArt);
+      }
+      if (dataCat.structured) {
+        setStructuredCats(dataCat.structured);
+      }
+      if (dataCat.all) {
+        setFlatCats(dataCat.all);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Erro ao carregar dados:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadArticles();
+    loadData();
   }, []);
 
   const handleEdit = (art: ArticleItem) => {
@@ -71,20 +87,23 @@ export default function AdmArtigosPage() {
     setTitle(art.title);
     setCategoryId(art.categoryId);
     setSummary(art.summary || "");
-    setContent(art.content);
+    setContent(art.content || "");
     setIsFeatured(art.isFeatured);
     setMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleNew = () => {
     setEditingId(null);
     setIsCreating(true);
     setTitle("");
-    setCategoryId(1);
+    // Categoria default
+    setCategoryId(flatCats.length > 0 ? flatCats[0].id : 1);
     setSummary("");
-    setContent("");
+    setContent("<p></p>");
     setIsFeatured(false);
     setMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleBack = () => {
@@ -114,7 +133,7 @@ export default function AdmArtigosPage() {
 
       if (res.ok) {
         setMessage("Artigo gravado com sucesso!");
-        await loadArticles();
+        await loadData();
         setTimeout(() => {
           handleBack();
         }, 1200);
@@ -122,123 +141,234 @@ export default function AdmArtigosPage() {
         setMessage("Erro ao salvar artigo.");
       }
     } catch {
-      setMessage("Erro de conexão.");
+      setMessage("Erro de conexão ao salvar.");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (confirm("Tem certeza que deseja excluir este artigo?")) {
+  const handleDelete = async (id: number, title: string) => {
+    if (confirm(`Tem certeza que deseja excluir o artigo "${title}"?`)) {
       try {
         await fetch(`/api/adm/artigos?id=${id}`, { method: "DELETE" });
-        loadArticles();
+        await loadData();
       } catch (err) {
         console.error(err);
       }
     }
   };
 
-  const filtered = articles.filter((a) =>
-    a.title.toLowerCase().includes(search.toLowerCase())
-  );
+  // Filtragem dos artigos
+  const filtered = articles.filter((a) => {
+    const matchSearch =
+      !search ||
+      a.title.toLowerCase().includes(search.toLowerCase()) ||
+      (a.summary && a.summary.toLowerCase().includes(search.toLowerCase()));
+
+    const matchCat =
+      !catFilter ||
+      a.categoryId.toString() === catFilter ||
+      (a.category && a.category.slug === catFilter) ||
+      (a.category && a.category.parentSlug === catFilter);
+
+    return matchSearch && matchCat;
+  });
+
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const paginatedArticles = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div className="space-y-4">
-      <div className="bg-[#12589e] text-white px-4 py-2 font-bold text-sm tracking-wide shadow-sm flex items-center justify-between">
+    <div className="space-y-6">
+      {/* Topo Azul com Botão de Ação */}
+      <div className="bg-[#12589e] text-white px-4 py-2.5 font-bold text-sm tracking-wide shadow-xs flex flex-wrap items-center justify-between gap-3">
         <span>&gt;&gt; ARTIGOS E ESTUDOS BÍBLICOS</span>
-        {!isCreating && !editingId && (
-          <button
-            onClick={handleNew}
-            className="bg-yellow-400 hover:bg-yellow-300 text-black px-3 py-1 text-xs font-bold rounded shadow cursor-pointer"
-          >
-            + Novo Artigo
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!isCreating && !editingId && (
+            <>
+              <Link
+                href="/adm/categorias"
+                className="bg-blue-800 hover:bg-blue-900 text-white px-3 py-1 text-xs font-semibold rounded shadow-xs inline-flex items-center gap-1 transition"
+              >
+                <Layers size={14} />
+                <span>Gerenciar Categorias</span>
+              </Link>
+              <button
+                onClick={handleNew}
+                className="bg-yellow-400 hover:bg-yellow-300 text-black px-3.5 py-1 text-xs font-bold rounded shadow-xs inline-flex items-center gap-1 cursor-pointer transition"
+              >
+                <Plus size={14} />
+                <span>Novo Artigo</span>
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {!isCreating && !editingId ? (
-        <div className="bg-white border border-gray-300 p-4 shadow-sm space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <input
-              type="text"
-              placeholder="Buscar artigo pelo título..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="border border-[#7f9db9] px-3 py-1.5 text-sm w-full max-w-sm bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
-            />
-            <span className="text-xs text-gray-600">
-              Total: <strong>{filtered.length}</strong> artigos
-            </span>
+        /* LISTAGEM DOS ARTIGOS */
+        <div className="bg-white border-2 border-gray-300 p-4 md:p-6 shadow-2xs space-y-4">
+          {/* Barra de Filtro e Busca */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3 border-b border-gray-200 pb-4">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              {/* Input de Busca */}
+              <div className="relative flex-1 md:w-80">
+                <input
+                  type="text"
+                  placeholder="Buscar pelo título ou palavra..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  className="border border-[#7f9db9] pl-8 pr-3 py-1.5 text-xs w-full bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
+                />
+                <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400" />
+              </div>
+
+              {/* Filtro por Categoria */}
+              <select
+                value={catFilter}
+                onChange={(e) => {
+                  setCatFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="border border-[#7f9db9] px-2.5 py-1.5 text-xs bg-[#f9fbfd] focus:bg-white focus:outline-none"
+              >
+                <option value="">Todas as Categorias</option>
+                {structuredCats.map((root) => (
+                  <optgroup key={root.id} label={`-- ${root.name} --`}>
+                    <option value={root.id}>{root.name} (Geral)</option>
+                    {root.subcategories.map((sub) => (
+                      <option key={sub.id} value={sub.id}>
+                        &nbsp;&nbsp;{sub.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            <div className="text-xs text-gray-600">
+              Mostrando <strong>{paginatedArticles.length}</strong> de <strong>{filtered.length}</strong> artigos
+              {totalPages > 1 && ` (Pág. ${page} de ${totalPages})`}
+            </div>
           </div>
 
+          {/* Tabela de Artigos */}
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
+            <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-[#f0f4f8] text-[#12589e] border-b border-gray-300 text-xs uppercase">
-                  <th className="p-2 border">Título</th>
-                  <th className="p-2 border">Categoria</th>
-                  <th className="p-2 border">Data</th>
-                  <th className="p-2 border text-center">Ações</th>
+                <tr className="bg-[#f0f4f8] text-[#12589e] border-b-2 border-gray-300 uppercase tracking-wider font-bold">
+                  <th className="p-2.5 border">Título do Estudo</th>
+                  <th className="p-2.5 border">Categoria / Subcategoria</th>
+                  <th className="p-2.5 border text-center">Data</th>
+                  <th className="p-2.5 border text-center w-28">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((art) => (
-                  <tr key={art.id} className="border-b hover:bg-yellow-50 text-xs">
-                    <td className="p-2 border font-medium text-gray-900">
-                      {art.title}
-                    </td>
-                    <td className="p-2 border text-gray-600">
-                      {art.category?.name || "Geral"}
-                    </td>
-                    <td className="p-2 border text-gray-500 whitespace-nowrap">
-                      {new Date(art.createdAt).toLocaleDateString("pt-BR")}
-                    </td>
-                    <td className="p-2 border text-center whitespace-nowrap space-x-2">
-                      <button
-                        onClick={() => handleEdit(art)}
-                        className="text-[#12589e] hover:underline font-bold cursor-pointer"
-                      >
-                        [Editar]
-                      </button>
-                      <button
-                        onClick={() => handleDelete(art.id)}
-                        className="text-red-600 hover:underline font-bold cursor-pointer"
-                      >
-                        [Excluir]
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
+                {loading ? (
                   <tr>
-                    <td colSpan={4} className="p-6 text-center text-gray-500 text-sm">
-                      Nenhum artigo encontrado. Clique no botão <strong>+ Novo Artigo</strong> acima para cadastrar.
+                    <td colSpan={4} className="p-8 text-center text-gray-500">
+                      Carregando artigos do acervo...
                     </td>
                   </tr>
+                ) : paginatedArticles.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-gray-500">
+                      Nenhum artigo encontrado com os filtros atuais.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedArticles.map((art) => (
+                    <tr key={art.id} className="border-b hover:bg-blue-50/50 transition">
+                      <td className="p-2.5 border font-semibold text-gray-900">
+                        <span className="block">{art.title}</span>
+                        {art.summary && (
+                          <span className="block text-[11px] text-gray-500 line-clamp-1 font-normal mt-0.5">
+                            {art.summary}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2.5 border text-gray-700 whitespace-nowrap">
+                        <span className="bg-blue-50 border border-blue-200 text-[#12589e] px-2 py-0.5 rounded text-[11px] font-bold">
+                          {art.category?.name || "Estudo"}
+                        </span>
+                      </td>
+                      <td className="p-2.5 border text-center text-gray-500 whitespace-nowrap">
+                        {new Date(art.createdAt).toLocaleDateString("pt-BR")}
+                      </td>
+                      <td className="p-2.5 border text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleEdit(art)}
+                            className="text-[#12589e] hover:text-blue-900 p-1 rounded hover:bg-blue-100 cursor-pointer font-bold inline-flex items-center gap-0.5"
+                            title="Editar este artigo"
+                          >
+                            <Edit2 size={13} />
+                            <span>Editar</span>
+                          </button>
+                          <button
+                            onClick={() => handleDelete(art.id, art.title)}
+                            className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50 cursor-pointer font-bold inline-flex items-center gap-0.5"
+                            title="Excluir este artigo"
+                          >
+                            <Trash2 size={13} />
+                            <span>Excluir</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </div>
+
+          {/* Paginação */}
+          {totalPages > 1 && (
+            <div className="pt-4 border-t border-gray-200 flex items-center justify-between">
+              <span className="text-xs text-gray-500">
+                Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+              </span>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1 border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 text-xs font-semibold rounded text-gray-700 cursor-pointer inline-flex items-center gap-1 transition"
+                >
+                  <ChevronLeft size={14} /> Anterior
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-3 py-1 border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 text-xs font-semibold rounded text-gray-700 cursor-pointer inline-flex items-center gap-1 transition"
+                >
+                  Próxima <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
-        <div className="max-w-3xl mx-auto border-2 border-[#12589e] bg-white p-6 shadow-md rounded-none">
-          <div className="border-b border-gray-300 pb-3 mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-[#12589e]">
+        /* FORMULÁRIO DE EDIÇÃO / NOVO ARTIGO COM EDITOR ESTILO WORD */
+        <div className="max-w-4xl mx-auto border-2 border-[#12589e] bg-white p-6 md:p-8 shadow-md rounded-none">
+          <div className="border-b border-gray-300 pb-3 mb-6 flex items-center justify-between">
+            <h2 className="text-lg md:text-xl font-bold text-[#12589e]">
               {editingId ? "Editar Artigo" : "Novo Artigo"}
             </h2>
             <button
               type="button"
               onClick={handleBack}
-              className="text-xs text-gray-600 hover:text-black underline cursor-pointer"
+              className="text-xs text-gray-600 hover:text-black underline cursor-pointer inline-flex items-center gap-1"
             >
-              Voltar para lista
+              <ArrowLeft size={14} /> Voltar para lista
             </button>
           </div>
 
           {message && (
             <div
-              className={`p-3 mb-4 text-sm font-semibold rounded text-center ${
+              className={`p-3 mb-6 text-xs font-bold rounded text-center ${
                 message.includes("sucesso")
                   ? "bg-green-100 text-green-800 border border-green-300"
                   : "bg-red-100 text-red-800 border border-red-300"
@@ -248,51 +378,66 @@ export default function AdmArtigosPage() {
             </div>
           )}
 
-          <form onSubmit={handleSave} className="space-y-4 text-sm">
+          <form onSubmit={handleSave} className="space-y-5 text-xs">
+            {/* Título do Artigo */}
             <div>
-              <label className="block font-bold text-gray-800 mb-1">
+              <label className="block font-bold text-gray-800 mb-1 text-sm">
                 Título do Artigo:
               </label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full border border-[#7f9db9] p-2 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
+                placeholder="Ex: O Poder da Oração Diária"
+                className="w-full border border-[#7f9db9] p-2.5 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] text-sm"
                 required
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+            {/* Categoria e Destaque */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
                 <label className="block font-bold text-gray-800 mb-1">
-                  Categoria:
+                  Categoria / Subcategoria:
                 </label>
                 <select
                   value={categoryId}
-                  onChange={(e) => setCategoryId(parseInt(e.target.value))}
-                  className="w-full border border-[#7f9db9] p-2 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
+                  onChange={(e) => setCategoryId(parseInt(e.target.value, 10))}
+                  className="w-full border border-[#7f9db9] p-2 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] text-xs font-medium"
                 >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
+                  {structuredCats.map((root) => (
+                    <optgroup key={root.id} label={`-- ${root.name} --`}>
+                      <option value={root.id}>{root.name} (Principal)</option>
+                      {root.subcategories.map((sub) => (
+                        <option key={sub.id} value={sub.id}>
+                          &nbsp;&nbsp;{sub.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Gerencie mais categorias ou subcategorias em{" "}
+                  <Link href="/adm/categorias" className="text-[#12589e] underline">
+                    Categorias
+                  </Link>.
+                </p>
               </div>
 
-              <div className="flex items-center pt-6">
-                <label className="flex items-center gap-2 cursor-pointer font-semibold text-gray-800">
+              <div className="flex items-center pt-4 md:pt-6">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-gray-800 select-none">
                   <input
                     type="checkbox"
                     checked={isFeatured}
                     onChange={(e) => setIsFeatured(e.target.checked)}
                     className="w-4 h-4 text-[#12589e]"
                   />
-                  Destacar na página inicial
+                  <span>Destacar na página inicial</span>
                 </label>
               </div>
             </div>
 
+            {/* Resumo */}
             <div>
               <label className="block font-bold text-gray-800 mb-1">
                 Breve Resumo (opcional):
@@ -300,40 +445,40 @@ export default function AdmArtigosPage() {
               <textarea
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
-                rows={2}
-                className="w-full border border-[#7f9db9] p-2 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
+                rows={3}
+                placeholder="Uma síntese destacada ou introdução que aparecerá no topo do artigo..."
+                className="w-full border border-[#7f9db9] p-2.5 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
               />
             </div>
 
+            {/* Conteúdo do Artigo com o RichTextEditor Estilo Word */}
             <div>
-              <label className="block font-bold text-gray-800 mb-1">
+              <label className="block font-bold text-gray-800 mb-1 text-sm">
                 Conteúdo do Artigo:
               </label>
-              <textarea
+              <RichTextEditor
                 value={content}
-                onChange={(e) => setContent(e.target.value)}
-                rows={12}
-                className="w-full border border-[#7f9db9] p-3 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] leading-relaxed"
-                placeholder="Escreva ou cole o artigo completo aqui..."
-                required
+                onChange={(newHtml) => setContent(newHtml)}
+                placeholder="Escreva ou formate seu estudo aqui com negrito, itálico, subtítulos, citações e listas..."
               />
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-4 pt-4 border-t border-gray-200">
-              <button
-                type="submit"
-                disabled={saving}
-                className="bg-[#12589e] hover:bg-[#0e447b] text-white font-bold px-8 py-2 rounded-none border border-[#0d3f73] shadow cursor-pointer transition active:scale-95 disabled:opacity-50 text-sm"
-              >
-                {saving ? "Gravando..." : "Gravar"}
-              </button>
-
+            {/* Botões de Ação */}
+            <div className="pt-4 border-t border-gray-300 flex items-center justify-between">
               <button
                 type="button"
                 onClick={handleBack}
-                className="bg-[#12589e] hover:bg-[#0e447b] text-white font-bold px-6 py-2 rounded-none border border-[#0d3f73] shadow cursor-pointer transition active:scale-95 text-sm"
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded cursor-pointer transition"
               >
-                Voltar Para Página Inicial
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-6 py-2 bg-[#12589e] hover:bg-[#0e4882] text-white font-bold rounded shadow-sm cursor-pointer transition disabled:opacity-50 text-sm"
+              >
+                {saving ? "Gravando Artigo..." : "Gravar Artigo"}
               </button>
             </div>
           </form>

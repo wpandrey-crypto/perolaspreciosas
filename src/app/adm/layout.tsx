@@ -25,6 +25,7 @@ export default function AdmLayout({ children }: { children: ReactNode }) {
     { label: "Cada Dia / Ocasiões Capa", href: "/adm/cada-dia" },
     { label: "Chamadas na Capa", href: "/adm/capa" },
     { label: "Artigos", href: "/adm/artigos" },
+    { label: "Categorias", href: "/adm/categorias" },
     { label: "HOJE", href: "/adm/hoje" },
     { label: "De A a Z", href: "/adm/artigos" },
   ];
