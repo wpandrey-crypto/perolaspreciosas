@@ -1,4 +1,4 @@
-import { NextResponse } from "next/navigation";
+import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 function slugify(text: string): string {
@@ -13,7 +13,7 @@ function slugify(text: string): string {
     .replace(/-+/g, "-");
 }
 
-// GET: Lista todas as categorias e subcategorias com contagem de artigos
+// GET: Lista todas as categorias e subcategorias com contagem de artigos e descrição
 export async function GET() {
   try {
     const categories = await prisma.category.findMany({
@@ -22,10 +22,10 @@ export async function GET() {
           select: { articles: true },
         },
       },
-      orderBy: [{ parentSlug: "asc" }, { orderIndex: "asc" }, { name: "asc" }],
+      orderBy: [{ orderIndex: "asc" }, { name: "asc" }],
     });
 
-    // Separa as principais e as filhas
+    // Separa as principais (parentSlug null ou vazio) e as filhas
     const rootCategories = categories.filter((c) => !c.parentSlug);
     const subcategories = categories.filter((c) => c.parentSlug);
 
@@ -41,7 +41,7 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Erro ao listar categorias:", error);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: "Erro interno ao listar categorias" }, { status: 500 });
   }
 }
 
@@ -49,7 +49,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { id, name, parentSlug, orderIndex } = body;
+    const { id, name, parentSlug, orderIndex, description } = body;
 
     if (!name || !name.trim()) {
       return NextResponse.json({ error: "O nome é obrigatório" }, { status: 400 });
@@ -66,6 +66,7 @@ export async function POST(req: Request) {
           name: cleanName,
           slug: slug,
           parentSlug: parentSlug ? parentSlug.trim() : null,
+          description: description !== undefined ? description : null,
           orderIndex: orderIndex ? Number(orderIndex) : 0,
         },
       });
@@ -84,6 +85,7 @@ export async function POST(req: Request) {
           name: cleanName,
           slug: uniqueSlug,
           parentSlug: parentSlug ? parentSlug.trim() : null,
+          description: description ? description.trim() : null,
           orderIndex: orderIndex ? Number(orderIndex) : 0,
         },
       });

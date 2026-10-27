@@ -3,7 +3,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import SidebarMenu from "@/components/SidebarMenu";
 import Link from "next/link";
-import { Search, BookOpen, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, BookOpen, ChevronLeft, ChevronRight, FileText } from "lucide-react";
 
 interface ArtigosPageProps {
   searchParams: Promise<{
@@ -17,7 +17,7 @@ export default async function ArtigosPage({ searchParams }: ArtigosPageProps) {
   const { cat, busca, pagina } = await searchParams;
 
   const currentPage = Math.max(1, parseInt(pagina || "1", 10) || 1);
-  const pageSize = 24;
+  const pageSize = 30; // Paginação rápida para não demorar a abrir
 
   const where: any = {};
   if (cat) {
@@ -42,7 +42,21 @@ export default async function ArtigosPage({ searchParams }: ArtigosPageProps) {
     prisma.article.count({ where }),
     prisma.article.findMany({
       where,
-      include: { category: true },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        summary: true,
+        createdAt: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            parentSlug: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
       skip: (currentPage - 1) * pageSize,
       take: pageSize,
@@ -51,7 +65,7 @@ export default async function ArtigosPage({ searchParams }: ArtigosPageProps) {
     prisma.coverMessage.findFirst({ where: { isActive: true } }),
   ]);
 
-  const totalPages = Math.ceil(totalCount / pageSize);
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
   const makePageUrl = (p: number) => {
     const params = new URLSearchParams();
@@ -74,34 +88,37 @@ export default async function ArtigosPage({ searchParams }: ArtigosPageProps) {
           {/* Área Central de Conteúdo */}
           <div className="flex-1 w-full min-w-0">
             {/* Cabeçalho da Seção */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b-2 border-[#12589e] pb-4 mb-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b-2 border-[#12589e] pb-3 mb-5">
               <div>
-                <h1 className="text-2xl md:text-3xl font-serif font-bold text-[#102a43]">
-                  {activeCategory
-                    ? activeCategory.name
-                    : busca
-                    ? `Busca por: "${busca}"`
-                    : "Todos os Artigos e Estudos"}
+                <h1 className="text-xl md:text-2xl font-serif font-bold text-[#102a43] flex items-center gap-2">
+                  <FileText size={22} className="text-[#12589e]" />
+                  <span>
+                    {activeCategory
+                      ? activeCategory.name
+                      : busca
+                      ? `Busca por: "${busca}"`
+                      : "Todos os Artigos e Estudos"}
+                  </span>
                 </h1>
-                <p className="text-xs text-gray-500 mt-1">
-                  Exibindo <strong>{articles.length}</strong> de <strong>{totalCount}</strong> artigos encontrados
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Mostrando <strong>{articles.length}</strong> de <strong>{totalCount}</strong> estudos
                   {totalPages > 1 && ` • Página ${currentPage} de ${totalPages}`}
                 </p>
               </div>
 
               {/* Campo de Busca Rápida */}
-              <form method="GET" action="/artigos" className="flex max-w-md w-full">
+              <form method="GET" action="/artigos" className="flex max-w-sm w-full">
                 {cat && <input type="hidden" name="cat" value={cat} />}
                 <input
                   type="text"
                   name="busca"
                   defaultValue={busca || ""}
-                  placeholder="Pesquisar por tema ou palavra..."
+                  placeholder="Pesquisar neste tema..."
                   className="flex-1 border border-gray-300 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
                 />
                 <button
                   type="submit"
-                  className="bg-[#12589e] hover:bg-[#0e447b] text-white px-4 py-1.5 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                  className="bg-[#12589e] hover:bg-[#0e447b] text-white px-3.5 py-1.5 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
                 >
                   <Search size={14} />
                   <span>Buscar</span>
@@ -109,90 +126,95 @@ export default async function ArtigosPage({ searchParams }: ArtigosPageProps) {
               </form>
             </div>
 
-            {/* Grade de Artigos */}
+            {/* Texto Principal da Categoria (Introdução em Destaque) */}
+            {activeCategory?.description && (
+              <div className="bg-blue-50/70 border-l-4 border-[#12589e] p-4 md:p-5 shadow-2xs mb-6 text-sm text-gray-800 leading-relaxed font-serif rounded-r">
+                <div className="text-xs font-bold text-[#12589e] uppercase tracking-wider mb-1">
+                  Introdução do Tema
+                </div>
+                <div className="whitespace-pre-line italic">
+                  {activeCategory.description}
+                </div>
+              </div>
+            )}
+
+            {/* LISTA DE ARTIGOS NO ESTILO FIEL AO LEGADO (LINHAS ZEBRADAS) */}
             {articles.length === 0 ? (
               <div className="bg-white border border-gray-300 p-12 text-center text-gray-600">
                 <BookOpen size={36} className="mx-auto text-gray-400 mb-3" />
                 <p className="text-base font-semibold">Nenhum artigo encontrado nesta seção.</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Tente buscar por outro termo ou clique em uma das categorias no Menu Principal.
+                  Tente buscar por outro termo ou escolha outra categoria no Menu Principal ao lado.
                 </p>
               </div>
             ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {articles.map((art) => (
-                    <article
+              <div className="border border-gray-300 shadow-2xs bg-white divide-y divide-gray-200">
+                {articles.map((art, idx) => {
+                  const isEven = idx % 2 === 0;
+                  const targetCategorySlug = art.category?.slug || cat || "geral";
+
+                  return (
+                    <div
                       key={art.id}
-                      className="bg-white border border-gray-300 hover:border-[#12589e] p-5 shadow-2xs transition hover:shadow-md flex flex-col justify-between"
+                      className={`p-3 md:px-5 md:py-3.5 transition hover:bg-yellow-50/80 ${
+                        isEven ? "bg-[#eef5fc]" : "bg-white"
+                      }`}
                     >
-                      <div>
-                        <span className="text-[11px] font-bold text-[#12589e] uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded">
-                          {art.category?.name || "Estudo"}
-                        </span>
-                        <h2 className="font-bold text-base text-[#102a43] mt-2 leading-snug">
-                          <Link
-                            href={`/artigos/${art.category?.slug || "geral"}/${art.slug}`}
-                            className="hover:text-[#12589e] transition"
-                          >
-                            {art.title}
-                          </Link>
-                        </h2>
-                        {art.summary && (
-                          <p className="text-xs text-gray-600 line-clamp-3 mt-2 leading-relaxed">
-                            {art.summary}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="mt-5 pt-3 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
-                        <span>{art.author || "Leda Latterza"}</span>
-                        <Link
-                          href={`/artigos/${art.category?.slug || "geral"}/${art.slug}`}
-                          className="font-bold text-[#12589e] hover:underline"
-                        >
-                          Ler estudo &rarr;
-                        </Link>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-
-                {/* Paginação */}
-                {totalPages > 1 && (
-                  <div className="mt-10 flex items-center justify-center gap-2">
-                    {currentPage > 1 ? (
+                      {/* Título com Marcador estilo Legado */}
                       <Link
-                        href={makePageUrl(currentPage - 1)}
-                        className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-100 text-xs font-semibold rounded text-gray-700 transition"
+                        href={`/artigos/${targetCategorySlug}/${art.slug}`}
+                        className="text-[#12589e] hover:text-[#0b3c6d] font-bold text-sm md:text-[15px] hover:underline block leading-snug"
                       >
-                        <ChevronLeft size={14} /> Anterior
+                        - {art.title}
                       </Link>
-                    ) : (
-                      <span className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 bg-gray-50 text-xs font-semibold rounded text-gray-400 cursor-not-allowed">
-                        <ChevronLeft size={14} /> Anterior
-                      </span>
-                    )}
 
-                    <span className="text-xs font-medium text-gray-600 px-3">
-                      Página <strong>{currentPage}</strong> de <strong>{totalPages}</strong>
+                      {/* Resumo / Subtítulo logo abaixo */}
+                      {art.summary && (
+                        <p className="text-xs md:text-[13px] text-gray-800 leading-relaxed mt-1 pl-2 font-normal">
+                          {art.summary}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Paginação Estilizada */}
+            {totalPages > 1 && (
+              <div className="mt-8 flex items-center justify-between border-t border-gray-200 pt-4">
+                <span className="text-xs text-gray-600">
+                  Página <strong>{currentPage}</strong> de <strong>{totalPages}</strong> (Total: {totalCount} artigos)
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  {currentPage > 1 ? (
+                    <Link
+                      href={makePageUrl(currentPage - 1)}
+                      className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-100 text-xs font-semibold rounded text-gray-700 transition shadow-2xs"
+                    >
+                      <ChevronLeft size={14} /> Anterior
+                    </Link>
+                  ) : (
+                    <span className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 bg-gray-50 text-xs font-semibold rounded text-gray-400 cursor-not-allowed">
+                      <ChevronLeft size={14} /> Anterior
                     </span>
+                  )}
 
-                    {currentPage < totalPages ? (
-                      <Link
-                        href={makePageUrl(currentPage + 1)}
-                        className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-100 text-xs font-semibold rounded text-gray-700 transition"
-                      >
-                        Próxima <ChevronRight size={14} />
-                      </Link>
-                    ) : (
-                      <span className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 bg-gray-50 text-xs font-semibold rounded text-gray-400 cursor-not-allowed">
-                        Próxima <ChevronRight size={14} />
-                      </span>
-                    )}
-                  </div>
-                )}
-              </>
+                  {currentPage < totalPages ? (
+                    <Link
+                      href={makePageUrl(currentPage + 1)}
+                      className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-100 text-xs font-semibold rounded text-gray-700 transition shadow-2xs"
+                    >
+                      Próxima <ChevronRight size={14} />
+                    </Link>
+                  ) : (
+                    <span className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 bg-gray-50 text-xs font-semibold rounded text-gray-400 cursor-not-allowed">
+                      Próxima <ChevronRight size={14} />
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>

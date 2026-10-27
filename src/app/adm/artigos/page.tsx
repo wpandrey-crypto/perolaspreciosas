@@ -1,18 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import RichTextEditor from "@/components/RichTextEditor";
-import { Search, Plus, Edit2, Trash2, ArrowLeft, Layers, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Plus, Edit2, Trash2, ArrowLeft, Layers, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
-interface ArticleItem {
+interface ArticleListItem {
   id: number;
   title: string;
   slug: string;
   categoryId: number;
-  category?: { name: string; slug: string; parentSlug?: string | null };
+  category?: { id: number; name: string; slug: string; parentSlug?: string | null };
   summary?: string;
-  content: string;
   author?: string;
   isFeatured: boolean;
   createdAt: string;
@@ -26,16 +25,19 @@ interface StructuredCategory {
 }
 
 export default function AdmArtigosPage() {
-  const [articles, setArticles] = useState<ArticleItem[]>([]);
-  const [structuredCats, setStructuredCats] = useState<StructuredCategory[]>([]);
-  const [flatCats, setFlatCats] = useState<{ id: number; name: string; parentSlug?: string | null }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [articles, setArticles] = useState<ArticleListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
 
-  // Paginação e Busca
+  const [structuredCats, setStructuredCats] = useState<StructuredCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingEdit, setLoadingEdit] = useState(false);
+
+  // Filtros
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
-  const [page, setPage] = useState(1);
-  const pageSize = 30;
 
   // Estado de Criação / Edição
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -50,55 +52,81 @@ export default function AdmArtigosPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const loadData = async () => {
+  // Carrega categorias uma única vez
+  const loadCategories = async () => {
     try {
-      setLoading(true);
-      const [resArt, resCat] = await Promise.all([
-        fetch("/api/adm/artigos"),
-        fetch("/api/adm/categorias"),
-      ]);
-
-      const dataArt = await resArt.json();
-      const dataCat = await resCat.json();
-
-      if (Array.isArray(dataArt)) {
-        setArticles(dataArt);
-      }
-      if (dataCat.structured) {
-        setStructuredCats(dataCat.structured);
-      }
-      if (dataCat.all) {
-        setFlatCats(dataCat.all);
+      const res = await fetch("/api/adm/categorias");
+      const data = await res.json();
+      if (data.structured) {
+        setStructuredCats(data.structured);
       }
     } catch (err) {
-      console.error("Erro ao carregar dados:", err);
-    } finally {
-      setLoading(false);
+      console.error("Erro ao carregar categorias:", err);
     }
   };
 
+  // Carrega lista paginada do servidor
+  const loadArticles = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.set("page", page.toString());
+      params.set("pageSize", pageSize.toString());
+      if (search) params.set("search", search);
+      if (catFilter) params.set("cat", catFilter);
+
+      const res = await fetch(`/api/adm/artigos?${params.toString()}`);
+      const data = await res.json();
+
+      if (data.items) {
+        setArticles(data.items);
+        setTotal(data.total || 0);
+        setTotalPages(data.totalPages || 1);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar artigos:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, catFilter]);
+
   useEffect(() => {
-    loadData();
+    loadCategories();
   }, []);
 
-  const handleEdit = (art: ArticleItem) => {
-    setEditingId(art.id);
-    setIsCreating(false);
-    setTitle(art.title);
-    setCategoryId(art.categoryId);
-    setSummary(art.summary || "");
-    setContent(art.content || "");
-    setIsFeatured(art.isFeatured);
-    setMessage("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  useEffect(() => {
+    loadArticles();
+  }, [loadArticles]);
+
+  const handleEdit = async (art: ArticleListItem) => {
+    try {
+      setLoadingEdit(true);
+      setEditingId(art.id);
+      setIsCreating(false);
+      setTitle(art.title);
+      setCategoryId(art.categoryId);
+      setSummary(art.summary || "");
+      setIsFeatured(art.isFeatured);
+      setMessage("");
+
+      // Busca o conteúdo completo do artigo por ID
+      const res = await fetch(`/api/adm/artigos?id=${art.id}`);
+      const fullArt = await res.json();
+      setContent(fullArt.content || "<p></p>");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      console.error(err);
+      setMessage("Erro ao carregar conteúdo do artigo.");
+    } finally {
+      setLoadingEdit(false);
+    }
   };
 
   const handleNew = () => {
     setEditingId(null);
     setIsCreating(true);
     setTitle("");
-    // Categoria default
-    setCategoryId(flatCats.length > 0 ? flatCats[0].id : 1);
+    setCategoryId(structuredCats[0]?.id || 1);
     setSummary("");
     setContent("<p></p>");
     setIsFeatured(false);
@@ -133,7 +161,7 @@ export default function AdmArtigosPage() {
 
       if (res.ok) {
         setMessage("Artigo gravado com sucesso!");
-        await loadData();
+        await loadArticles();
         setTimeout(() => {
           handleBack();
         }, 1200);
@@ -147,39 +175,20 @@ export default function AdmArtigosPage() {
     }
   };
 
-  const handleDelete = async (id: number, title: string) => {
-    if (confirm(`Tem certeza que deseja excluir o artigo "${title}"?`)) {
+  const handleDelete = async (id: number, artTitle: string) => {
+    if (confirm(`Tem certeza que deseja excluir o artigo "${artTitle}"?`)) {
       try {
         await fetch(`/api/adm/artigos?id=${id}`, { method: "DELETE" });
-        await loadData();
+        await loadArticles();
       } catch (err) {
         console.error(err);
       }
     }
   };
 
-  // Filtragem dos artigos
-  const filtered = articles.filter((a) => {
-    const matchSearch =
-      !search ||
-      a.title.toLowerCase().includes(search.toLowerCase()) ||
-      (a.summary && a.summary.toLowerCase().includes(search.toLowerCase()));
-
-    const matchCat =
-      !catFilter ||
-      a.categoryId.toString() === catFilter ||
-      (a.category && a.category.slug === catFilter) ||
-      (a.category && a.category.parentSlug === catFilter);
-
-    return matchSearch && matchCat;
-  });
-
-  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
-  const paginatedArticles = filtered.slice((page - 1) * pageSize, page * pageSize);
-
   return (
     <div className="space-y-6">
-      {/* Topo Azul com Botão de Ação */}
+      {/* Topo Azul com Botões */}
       <div className="bg-[#12589e] text-white px-4 py-2.5 font-bold text-sm tracking-wide shadow-xs flex flex-wrap items-center justify-between gap-3">
         <span>&gt;&gt; ARTIGOS E ESTUDOS BÍBLICOS</span>
         <div className="flex items-center gap-2">
@@ -205,7 +214,7 @@ export default function AdmArtigosPage() {
       </div>
 
       {!isCreating && !editingId ? (
-        /* LISTAGEM DOS ARTIGOS */
+        /* LISTAGEM DOS ARTIGOS PAGINADA E VELOZ */
         <div className="bg-white border-2 border-gray-300 p-4 md:p-6 shadow-2xs space-y-4">
           {/* Barra de Filtro e Busca */}
           <div className="flex flex-col md:flex-row items-center justify-between gap-3 border-b border-gray-200 pb-4">
@@ -248,9 +257,12 @@ export default function AdmArtigosPage() {
               </select>
             </div>
 
-            <div className="text-xs text-gray-600">
-              Mostrando <strong>{paginatedArticles.length}</strong> de <strong>{filtered.length}</strong> artigos
-              {totalPages > 1 && ` (Pág. ${page} de ${totalPages})`}
+            <div className="text-xs text-gray-600 flex items-center gap-2">
+              {loading && <Loader2 size={14} className="animate-spin text-[#12589e]" />}
+              <span>
+                Mostrando <strong>{articles.length}</strong> de <strong>{total}</strong> artigos
+                {totalPages > 1 && ` (Pág. ${page} de ${totalPages})`}
+              </span>
             </div>
           </div>
 
@@ -261,25 +273,26 @@ export default function AdmArtigosPage() {
                 <tr className="bg-[#f0f4f8] text-[#12589e] border-b-2 border-gray-300 uppercase tracking-wider font-bold">
                   <th className="p-2.5 border">Título do Estudo</th>
                   <th className="p-2.5 border">Categoria / Subcategoria</th>
-                  <th className="p-2.5 border text-center">Data</th>
+                  <th className="p-2.5 border text-center w-24">Data</th>
                   <th className="p-2.5 border text-center w-28">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={4} className="p-8 text-center text-gray-500">
-                      Carregando artigos do acervo...
+                    <td colSpan={4} className="p-10 text-center text-gray-500">
+                      <Loader2 size={24} className="animate-spin mx-auto text-[#12589e] mb-2" />
+                      <span>Carregando artigos...</span>
                     </td>
                   </tr>
-                ) : paginatedArticles.length === 0 ? (
+                ) : articles.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="p-8 text-center text-gray-500">
                       Nenhum artigo encontrado com os filtros atuais.
                     </td>
                   </tr>
                 ) : (
-                  paginatedArticles.map((art) => (
+                  articles.map((art) => (
                     <tr key={art.id} className="border-b hover:bg-blue-50/50 transition">
                       <td className="p-2.5 border font-semibold text-gray-900">
                         <span className="block">{art.title}</span>
@@ -328,21 +341,21 @@ export default function AdmArtigosPage() {
           {totalPages > 1 && (
             <div className="pt-4 border-t border-gray-200 flex items-center justify-between">
               <span className="text-xs text-gray-500">
-                Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+                Página <strong>{page}</strong> de <strong>{totalPages}</strong> (Total: {total} artigos)
               </span>
 
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="px-3 py-1 border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 text-xs font-semibold rounded text-gray-700 cursor-pointer inline-flex items-center gap-1 transition"
+                  disabled={page === 1 || loading}
+                  className="px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 text-xs font-semibold rounded text-gray-700 cursor-pointer inline-flex items-center gap-1 transition"
                 >
                   <ChevronLeft size={14} /> Anterior
                 </button>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  className="px-3 py-1 border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 text-xs font-semibold rounded text-gray-700 cursor-pointer inline-flex items-center gap-1 transition"
+                  disabled={page === totalPages || loading}
+                  className="px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-40 text-xs font-semibold rounded text-gray-700 cursor-pointer inline-flex items-center gap-1 transition"
                 >
                   Próxima <ChevronRight size={14} />
                 </button>
@@ -378,110 +391,111 @@ export default function AdmArtigosPage() {
             </div>
           )}
 
-          <form onSubmit={handleSave} className="space-y-5 text-xs">
-            {/* Título do Artigo */}
-            <div>
-              <label className="block font-bold text-gray-800 mb-1 text-sm">
-                Título do Artigo:
-              </label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ex: O Poder da Oração Diária"
-                className="w-full border border-[#7f9db9] p-2.5 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] text-sm"
-                required
-              />
+          {loadingEdit ? (
+            <div className="py-12 text-center text-gray-500">
+              <Loader2 size={28} className="animate-spin mx-auto text-[#12589e] mb-2" />
+              <span>Carregando dados do artigo...</span>
             </div>
+          ) : (
+            <form onSubmit={handleSave} className="space-y-5 text-xs">
+              {/* Título do Artigo */}
+              <div>
+                <label className="block font-bold text-gray-800 mb-1 text-sm">
+                  Título do Artigo:
+                </label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Ex: O Poder da Oração Diária"
+                  className="w-full border border-[#7f9db9] p-2.5 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] text-sm"
+                  required
+                />
+              </div>
 
-            {/* Categoria e Destaque */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2">
+              {/* Categoria e Destaque */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block font-bold text-gray-800 mb-1">
+                    Categoria / Subcategoria:
+                  </label>
+                  <select
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(parseInt(e.target.value, 10))}
+                    className="w-full border border-[#7f9db9] p-2 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] text-xs font-medium"
+                  >
+                    {structuredCats.map((root) => (
+                      <optgroup key={root.id} label={`-- ${root.name} --`}>
+                        <option value={root.id}>{root.name} (Principal)</option>
+                        {root.subcategories.map((sub) => (
+                          <option key={sub.id} value={sub.id}>
+                            &nbsp;&nbsp;{sub.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center pt-4 md:pt-6">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-gray-800 select-none">
+                    <input
+                      type="checkbox"
+                      checked={isFeatured}
+                      onChange={(e) => setIsFeatured(e.target.checked)}
+                      className="w-4 h-4 text-[#12589e]"
+                    />
+                    <span>Destacar na página inicial</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Resumo */}
+              <div>
                 <label className="block font-bold text-gray-800 mb-1">
-                  Categoria / Subcategoria:
+                  Breve Resumo (opcional):
                 </label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(parseInt(e.target.value, 10))}
-                  className="w-full border border-[#7f9db9] p-2 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e] text-xs font-medium"
+                <textarea
+                  value={summary}
+                  onChange={(e) => setSummary(e.target.value)}
+                  rows={3}
+                  placeholder="Uma síntese destacada ou introdução..."
+                  className="w-full border border-[#7f9db9] p-2.5 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
+                />
+              </div>
+
+              {/* Conteúdo com RichTextEditor */}
+              <div>
+                <label className="block font-bold text-gray-800 mb-1 text-sm">
+                  Conteúdo do Artigo:
+                </label>
+                <RichTextEditor
+                  value={content}
+                  onChange={(newHtml) => setContent(newHtml)}
+                  placeholder="Escreva ou formate seu estudo aqui com negrito, itálico, subtítulos, citações e listas..."
+                />
+              </div>
+
+              {/* Botões */}
+              <div className="pt-4 border-t border-gray-300 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded cursor-pointer transition"
                 >
-                  {structuredCats.map((root) => (
-                    <optgroup key={root.id} label={`-- ${root.name} --`}>
-                      <option value={root.id}>{root.name} (Principal)</option>
-                      {root.subcategories.map((sub) => (
-                        <option key={sub.id} value={sub.id}>
-                          &nbsp;&nbsp;{sub.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Gerencie mais categorias ou subcategorias em{" "}
-                  <Link href="/adm/categorias" className="text-[#12589e] underline">
-                    Categorias
-                  </Link>.
-                </p>
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-6 py-2 bg-[#12589e] hover:bg-[#0e4882] text-white font-bold rounded shadow-sm cursor-pointer transition disabled:opacity-50 text-sm"
+                >
+                  {saving ? "Gravando Artigo..." : "Gravar Artigo"}
+                </button>
               </div>
-
-              <div className="flex items-center pt-4 md:pt-6">
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-gray-800 select-none">
-                  <input
-                    type="checkbox"
-                    checked={isFeatured}
-                    onChange={(e) => setIsFeatured(e.target.checked)}
-                    className="w-4 h-4 text-[#12589e]"
-                  />
-                  <span>Destacar na página inicial</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Resumo */}
-            <div>
-              <label className="block font-bold text-gray-800 mb-1">
-                Breve Resumo (opcional):
-              </label>
-              <textarea
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                rows={3}
-                placeholder="Uma síntese destacada ou introdução que aparecerá no topo do artigo..."
-                className="w-full border border-[#7f9db9] p-2.5 bg-[#f9fbfd] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
-              />
-            </div>
-
-            {/* Conteúdo do Artigo com o RichTextEditor Estilo Word */}
-            <div>
-              <label className="block font-bold text-gray-800 mb-1 text-sm">
-                Conteúdo do Artigo:
-              </label>
-              <RichTextEditor
-                value={content}
-                onChange={(newHtml) => setContent(newHtml)}
-                placeholder="Escreva ou formate seu estudo aqui com negrito, itálico, subtítulos, citações e listas..."
-              />
-            </div>
-
-            {/* Botões de Ação */}
-            <div className="pt-4 border-t border-gray-300 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={handleBack}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded cursor-pointer transition"
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-6 py-2 bg-[#12589e] hover:bg-[#0e4882] text-white font-bold rounded shadow-sm cursor-pointer transition disabled:opacity-50 text-sm"
-              >
-                {saving ? "Gravando Artigo..." : "Gravar Artigo"}
-              </button>
-            </div>
-          </form>
+            </form>
+          )}
         </div>
       )}
     </div>

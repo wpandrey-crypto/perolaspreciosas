@@ -30,6 +30,7 @@ export default function AdmCategoriasPage() {
   const [formName, setFormName] = useState("");
   const [formSlug, setFormSlug] = useState("");
   const [formParentSlug, setFormParentSlug] = useState("");
+  const [formDescription, setFormDescription] = useState("");
   const [formOrder, setFormOrder] = useState(0);
   const [saving, setSaving] = useState(false);
 
@@ -59,17 +60,19 @@ export default function AdmCategoriasPage() {
     setFormName("");
     setFormSlug("");
     setFormParentSlug(defaultParentSlug);
+    setFormDescription("");
     setFormOrder(0);
     setErrorMsg("");
     setSuccessMsg("");
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (cat: CategoryItem) => {
+  const handleOpenEdit = (cat: CategoryItem & { description?: string | null }) => {
     setEditingId(cat.id);
     setFormName(cat.name);
     setFormSlug(cat.slug);
     setFormParentSlug(cat.parentSlug || "");
+    setFormDescription(cat.description || "");
     setFormOrder(cat.orderIndex || 0);
     setErrorMsg("");
     setSuccessMsg("");
@@ -96,6 +99,7 @@ export default function AdmCategoriasPage() {
           name: formName,
           slug: formSlug,
           parentSlug: formParentSlug || null,
+          description: formDescription.trim() || null,
           orderIndex: formOrder,
         }),
       });
@@ -340,6 +344,19 @@ export default function AdmCategoriasPage() {
                   value={formSlug}
                   onChange={(e) => setFormSlug(e.target.value)}
                   placeholder="ex: homens, casais (sem espaços)"
+                  className="w-full border border-gray-300 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Texto Principal da Categoria / Introdução (Opcional):
+                </label>
+                <textarea
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  rows={4}
+                  placeholder="Texto introdutório ou mensagem de destaque que aparecerá no topo da categoria antes da lista de estudos..."
                   className="w-full border border-gray-300 px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#12589e]"
                 />
               </div>
