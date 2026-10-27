@@ -39,9 +39,12 @@ export async function GET() {
       roots: rootCategories,
       structured,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro ao listar categorias:", error);
-    return NextResponse.json({ error: "Erro interno ao listar categorias" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Erro interno ao listar categorias" },
+      { status: 500 }
+    );
   }
 }
 
@@ -59,15 +62,32 @@ export async function POST(req: Request) {
     let slug = body.slug ? slugify(body.slug) : slugify(cleanName);
 
     if (id) {
+      const catId = Number(id);
+
+      // Verifica se o slug pretendido já está em uso por OUTRA categoria
+      const slugConflict = await prisma.category.findFirst({
+        where: {
+          slug: slug,
+          NOT: { id: catId },
+        },
+      });
+
+      if (slugConflict) {
+        return NextResponse.json(
+          { error: `O slug "${slug}" já está em uso pela categoria "${slugConflict.name}". Escolha outro slug.` },
+          { status: 400 }
+        );
+      }
+
       // Edição
       const updated = await prisma.category.update({
-        where: { id: Number(id) },
+        where: { id: catId },
         data: {
           name: cleanName,
           slug: slug,
           parentSlug: parentSlug ? parentSlug.trim() : null,
           description: description !== undefined ? description : null,
-          orderIndex: orderIndex ? Number(orderIndex) : 0,
+          orderIndex: orderIndex !== undefined && orderIndex !== null ? Number(orderIndex) : 0,
         },
       });
       return NextResponse.json(updated);
@@ -91,9 +111,12 @@ export async function POST(req: Request) {
       });
       return NextResponse.json(created);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro ao salvar categoria:", error);
-    return NextResponse.json({ error: "Erro ao salvar categoria" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Erro ao salvar categoria no banco de dados" },
+      { status: 500 }
+    );
   }
 }
 
@@ -147,8 +170,11 @@ export async function DELETE(req: Request) {
 
     await prisma.category.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro ao excluir categoria:", error);
-    return NextResponse.json({ error: "Erro interno ao excluir" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Erro interno ao excluir categoria" },
+      { status: 500 }
+    );
   }
 }
